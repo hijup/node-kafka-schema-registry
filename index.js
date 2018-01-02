@@ -1,5 +1,7 @@
-const consumersr = require('./src/lib/consumersr')
+const Consumer = require('./src/lib/consumersr')
+const Producer = require('./src/lib/producersr')
 
 module.exports = {
-  Consumer: consumersr
+  Consumer,
+  Producer
 }
