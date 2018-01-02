@@ -78,7 +78,7 @@ module.exports = class Producer {
         })
         .connect(err => {
           if (err)
-            throw new Error(`Producer error when connecting to kafka ${err}`)
+            throw new Error(`Producer error when connecting to kafka ${JSON.stringify(err)}`)
         })
     })
 	}
