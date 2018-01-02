@@ -15,5 +15,8 @@
     "avsc": "^5.1.1",
     "isomorphic-fetch": "^2.2.1",
     "node-rdkafka": "^2.2.1"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
