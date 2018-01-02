@@ -38,7 +38,7 @@ module.exports = class Producer {
           callback()
       })
       .catch(err => {
-        throw new Error(`Error when fetching subject from Schema Registry: ${err}`)
+        throw new Error(`Error when fetching subject from Schema Registry: ${JSON.stringify(err)}`)
       })
   }
 
@@ -52,7 +52,13 @@ module.exports = class Producer {
     }
     
     return fetch(uri, options)
-			.then(data => data.json())
+			.then(response => {
+        if (response.status >= 400)
+          return response.json()
+            .then(err => Promise.reject(err))
+        else
+          return response.json()
+      })
   }
 	
 	init() {
