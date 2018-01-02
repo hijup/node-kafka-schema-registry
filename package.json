@@ -4,9 +4,6 @@
   "description": "",
   "main": "index.js",
   "repository": "git@github.com:hijup/node-kafka-schema-registry.git",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
   "keywords": [
     "kafka",
     "schema",
