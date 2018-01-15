@@ -57,9 +57,11 @@ module.exports = class Consumer {
   }
 
   getSchema(schemaId) {
-    if (this.schemas[schemaId] != null)
+    if (this.schemas[schemaId] != null) {
+      console.log(`getting schema from memory. schemaId: ${schemaId}`)
       return Promise.resolve(this.schemas[schemaId])
-    else
+    } else {
+      console.log(`getting schema from ${this.registryUrl}. schemaId: ${schemaId}`)
       return fetch(`${this.registryUrl}/schemas/ids/${schemaId}`)
         .then(data => data.json())
         .then(data => {
@@ -67,6 +69,7 @@ module.exports = class Consumer {
           this.schemas[schemaId] = schema
           return schema
         })
+    }
   }
 
   parseMessage(schema, messageBuffer) {
