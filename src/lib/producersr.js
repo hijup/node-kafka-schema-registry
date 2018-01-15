@@ -11,6 +11,9 @@ module.exports = class Producer {
     this.types = {}
     this.MAGIC_NUMBER = 0
 
+    this.isReady = false
+    this.preProduced = []
+
     this.init()
   }
 
@@ -60,6 +63,13 @@ module.exports = class Producer {
           return response.json()
       })
   }
+
+  processPreProduced() {
+    while (this.preProduced.length > 0) {
+      const message = this.preProduced.shift()
+      this.produce(...message)
+    }
+  }
 	
 	init() {
     this.processSchemas(() => {
@@ -67,14 +77,20 @@ module.exports = class Producer {
       this.producer
         .on('event.log', console.log)
         .on('event.error', console.error)
-        .on('ready', arg => {
+        .once('ready', arg => {
+          this.isReady = true
           console.log('producer ready', JSON.stringify(arg))
+          this.processPreProduced()
         })
         .on('delivery-report', (err, report) => {
           if (err) 
             console.error('Error when producer receive delivery report: ', err)
           else
             console.log('Delivery report: ', report)
+        })
+        .on('disconnected', () => {
+          this.isReady = false
+          console.log('goodbye')
         })
         .connect(err => {
           if (err)
@@ -84,27 +100,27 @@ module.exports = class Producer {
 	}
 	
 	produce(topic, data, callback) {
-    try {
-      this.producer
-        .on('ready', () => {
-          if (this.schemaIds[topic] == null) {
-            console.error('schemaId not found')
-            if (callback && typeof callback === 'function')
-              callback({
-                message: 'schemaId not found'
-              })
-          } else {
-            const buffer = this.toMessageBuffer(topic, data, 10240)
-            this.producer.produce(topic, null, buffer, null, null)
-            console.log('Successfully produce to kafka')
-          }
-        })
-    } catch (err) {
-      console.error(err)
-      if (callback && typeof callback === 'function')
-        callback(err)
-    }
-	}
+    if (this.isReady)
+      try {
+        if (this.schemaIds[topic] == null) {
+          console.error('schemaId not found')
+          if (callback && typeof callback === 'function')
+            callback({
+              message: 'schemaId not found'
+            })
+        } else {
+          const buffer = this.toMessageBuffer(topic, data, 10240)
+          this.producer.produce(topic, null, buffer, null, null)
+          console.log('Successfully produce to kafka')
+        }
+      } catch (err) {
+        console.error(err)
+        if (callback && typeof callback === 'function')
+          callback(err)
+      }
+    else
+      this.preProduced.push([topic, data, callback])
+  }
 
   toMessageBuffer(topic, data, length = 1024) {
     const buffer = new Buffer(length)
