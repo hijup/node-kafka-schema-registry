@@ -121,6 +121,10 @@ module.exports = class Producer {
     else
       this.preProduced.push([topic, data, callback])
   }
+  
+  disconnect() {
+    this.producer.disconnect()
+  }
 
   toMessageBuffer(topic, data, length = 1024) {
     const buffer = new Buffer(length)
