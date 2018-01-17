@@ -18,45 +18,24 @@ module.exports = class Producer {
     this.init()
   }
 
-  processSchemas(callback) {
-    const schemasFetch = this.schemas.map(schema => new Promise((resolve, reject) => {
+  processSchemas() {
+    const schemasFetch = this.schemas.map(schema => {
       const subject = schema.name
       this.types[subject] = avro.parse(schema, { wrapUnions: true })
-      this.registerSchema(subject, schema)
-        .then(data => {
-          console.log('schemafetch', data)
-          resolve({
-            subject,
-            ...data
-          })
-        })
-        .catch(error => {
-          if (error.error_code && error.error_code === 409)
-            resolve({ error, subject, schema })
-          else
-            reject(error)
-        })
-    }))
+      return this.registerSchema(subject, schema)
+    })
 
-    Promise.all(schemasFetch)
-      .then(schemas => {
-        let registeredSchemas = []
-        let failedSchemas = []
-        schemas.forEach(schema => {
-          if (schema.error)
-            failedSchemas.push(schema)
-          else
-            registeredSchemas.push(schema)
-        })
+    console.log('Processing schemas...')
+    return Promise.all(schemasFetch)
+      .then(responses => {
+        const successCount = responses.filter(response => response.success).length
+        const failed = responses.filter(response => !response.success).map((response, index) => `index: ${index}, message: ${response.message}`)
+        console.log(`${successCount} success, total: ${schemasFetch.length}`)
 
-        this.schemaIds = registeredSchemas.reduce((acc, schema) => Object.assign(acc, {[schema.subject]: schema.id}), {})
-        this.failedSchemaIds = failedSchemas.reduce((acc, item) => Object.assign(acc, {[item.subject]: item.error}), {})
+        if (failed.length > 0)
+          console.error(`${failed.length} failed`, failed.join('\n'))
 
-        if (callback && typeof callback === 'function')
-          callback()
-      })
-      .catch(err => {
-        throw new Error(`Error when fetching subject from Schema Registry: ${JSON.stringify(err)}`)
+        console.log(this.schemaIds, this.failedSchemaIds)
       })
   }
 
@@ -70,12 +49,15 @@ module.exports = class Producer {
     }
     
     return fetch(uri, options)
-			.then(response => {
-        if (response.status >= 400)
-          return response.json()
-            .then(err => Promise.reject(err))
-        else
-          return response.json()
+      .then(response => response.json())
+      .then(data => {
+        if (data.error_code && data.error_code >= 400) {
+          this.failedSchemaIds[subject] = data
+          return { success: false, ...data}
+        } else {
+          this.schemaIds[subject] = data.id
+          return { success: true }
+        }
       })
   }
 
@@ -87,40 +69,41 @@ module.exports = class Producer {
   }
 	
 	init() {
-    this.processSchemas(() => {
-      this.producer.setPollInterval(1000)
-      this.producer
-        .on('event.log', console.log)
-        .on('event.error', console.error)
-        .once('ready', arg => {
-          this.isReady = true
-          console.log('producer ready', JSON.stringify(arg))
-          this.processPreProduced()
-        })
-        .on('delivery-report', (err, report) => {
-          if (err) 
-            console.error('Error when producer receive delivery report: ', err)
-          else
-            console.log('Delivery report: ', report)
-        })
-        .on('disconnected', () => {
-          this.isReady = false
-          console.log('goodbye')
-        })
-        .connect(err => {
-          if (err)
-            throw new Error(`Producer error when connecting to kafka ${JSON.stringify(err)}`)
-        })
-    })
+    this.processSchemas()
+      .then(() => {
+        this.producer.setPollInterval(1000)
+        this.producer
+          .on('event.log', console.log)
+          .on('event.error', console.error)
+          .once('ready', arg => {
+            this.isReady = true
+            console.log('producer ready', JSON.stringify(arg))
+            this.processPreProduced()
+          })
+          .on('delivery-report', (err, report) => {
+            if (err) 
+              console.error('Error when producer receive delivery report: ', err)
+            else
+              console.log('Delivery report: ', report)
+          })
+          .on('disconnected', () => {
+            this.isReady = false
+            console.log('goodbye')
+          })
+          .connect(err => {
+            if (err)
+              throw new Error(`Producer error when connecting to kafka ${JSON.stringify(err)}`)
+          })
+      })
 	}
 	
 	produce(topic, data, callback) {
     if (this.isReady)
       try {
-        if (this.schemaIds[topic] === null) {
+        if (this.schemaIds[topic] == null) {
           let message
 
-          if (this.failedSchemaIds[topic] !== null)
+          if (this.failedSchemaIds[topic] != null)
             message = `Unable to produce, the schema not successfully registered. Message: ${this.failedSchemaIds[topic].message}`
           else
             message = `schemaId not found!`
