@@ -7,9 +7,8 @@ module.exports = class Producer {
     this.producer = new kafka.Producer(rdkafkaProducerConfig)
     this.registryUrl = registryUrl
     this.schemas = schemas
-    this.schemaIds = {}
-    this.failedSchemaIds = {}
-    this.types = {}
+    
+    this.topicsMeta = {}
     this.MAGIC_NUMBER = 0
 
     this.isReady = false
@@ -19,11 +18,7 @@ module.exports = class Producer {
   }
 
   processSchemas() {
-    const schemasFetch = this.schemas.map(schema => {
-      const subject = schema.name
-      this.types[subject] = avro.parse(schema, { wrapUnions: true })
-      return this.registerSchema(subject, schema)
-    })
+    const schemasFetch = this.schemas.map(schema => this.registerSchema(schema.name, schema))
 
     console.log('Processing schemas...')
     return Promise.all(schemasFetch)
@@ -34,8 +29,6 @@ module.exports = class Producer {
 
         if (failed.length > 0)
           console.error(`${failed.length} failed`, failed.join('\n'))
-
-        console.log(this.schemaIds, this.failedSchemaIds)
       })
   }
 
@@ -52,22 +45,33 @@ module.exports = class Producer {
       .then(response => response.json())
       .then(data => {
         if (data.error_code && data.error_code >= 400) {
-          this.failedSchemaIds[subject] = data
-          return { success: false, ...data}
+          this.topicsMeta[subject] = {
+            error: data
+          }
+          return { success: false, ...data }
         } else {
-          this.schemaIds[subject] = data.id
-          return { success: true }
+          this.topicsMeta[subject] = {
+            schemaId: data.id,
+            type: avro.parse(schema, { wrapUnions: true})
+          }
+          return { success: true, ...data }
         }
       })
   }
 
   processPreProduced() {
+    let success = 0
+    let total = this.preProduced.length
     while (this.preProduced.length > 0) {
       const message = this.preProduced.shift()
       this.produce(...message)
-        .then(console.log)
+        .then(() => {
+          success++
+        })
         .catch(console.error)
     }
+
+    console.log(`${success}/${total} pre-produced messages produced successfully!`)
   }
 	
 	init() {
@@ -101,30 +105,31 @@ module.exports = class Producer {
 	
 	produce(topic, data) {
     return new Promise((resolve, reject) => {
-      if (this.isReady) {
-        if (this.failedSchemaIds[topic] != null)
-          reject({
+      if (this.isReady) {        
+        if (this.topicsMeta[topic] == null)
+          return reject({
             error: true,
-            message: `Unable to produce, the schema isn't successfully registered. ${this.failedSchemaIds[topic].message}`
+            message: `Can't produce with topic: ${topic}`
           })
-        else if (this.schemaIds[topic] == null)
-          reject({
+
+        if (this.topicsMeta[topic].error)
+          return reject({
             error: true,
-            message: `schemaId not found!`
+            message: `Unable to produce, the schema was not successfully registered. ${this.topicsMeta[topic].error.message}`
           })
-        else {
-          try {
-            const buffer = this.toMessageBuffer(topic, data, 10240)
-            this.producer.produce(topic, null, buffer, null, null)
-            console.log('trying')
-            resolve({ message: 'Message produced'})
-          } catch (err) {
-            reject(err)
-          }
+
+        try {
+          const schemaId = this.topicsMeta[topic].schemaId
+          const avroSchema = this.topicsMeta[topic].type
+          const buffer = this.toMessageBuffer(schemaId, avroSchema, data, 10240)
+          this.producer.produce(topic, null, buffer, null, null)
+          return resolve({ message: 'Message produced'})
+        } catch (err) {
+          return reject(err)
         }
-      } else {
+    } else {
         this.preProduced.push([topic, data])
-        resolve({ success: false, message: `Producer not yet ready, message quequed`})
+        return resolve({ success: false, message: `Producer not yet ready, message quequed`})
       }
     })
   }
@@ -133,15 +138,15 @@ module.exports = class Producer {
     this.producer.disconnect()
   }
 
-  toMessageBuffer(topic, data, length = 1024) {
+  toMessageBuffer(schemaId, avroSchema, data, length = 1024) {
     const buffer = new Buffer(length)
     buffer[0] = this.MAGIC_NUMBER
-    buffer.writeInt32BE(this.schemaIds[topic], 1)
+    buffer.writeInt32BE(schemaId, 1)
 
-    const pos = this.types[topic].encode(data, buffer, 5);
-    if (pos < 0) {
-      return this.toMessageBuffer(topic, length)
-    }
+    const pos = avroSchema.encode(data, buffer, 5);
+    if (pos < 0)
+      return this.toMessageBuffer(schemaId, avroSchema, length)
+
     return buffer.slice(0, pos)
   }
 }
