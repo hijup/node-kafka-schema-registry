@@ -7,7 +7,8 @@ module.exports = class Producer {
     this.producer = new kafka.Producer(rdkafkaProducerConfig)
     this.registryUrl = registryUrl
     this.schemas = schemas
-		this.schemaIds = {}
+    this.schemaIds = {}
+    this.failedSchemaIds = {}
     this.types = {}
     this.MAGIC_NUMBER = 0
 
@@ -29,14 +30,28 @@ module.exports = class Producer {
             ...data
           })
         })
-        .catch(err => {
-          reject(err)
+        .catch(error => {
+          if (error.error_code && error.error_code === 409)
+            resolve({ error, subject, schema })
+          else
+            reject(error)
         })
     }))
 
     Promise.all(schemasFetch)
       .then(schemas => {
-        this.schemaIds = schemas.reduce((acc, schema) => Object.assign(acc, {[schema.subject]: schema.id}), {})
+        let registeredSchemas = []
+        let failedSchemas = []
+        schemas.forEach(schema => {
+          if (schema.error)
+            failedSchemas.push(schema)
+          else
+            registeredSchemas.push(schema)
+        })
+
+        this.schemaIds = registeredSchemas.reduce((acc, schema) => Object.assign(acc, {[schema.subject]: schema.id}), {})
+        this.failedSchemaIds = failedSchemas.reduce((acc, item) => Object.assign(acc, {[item.subject]: item.error}), {})
+
         if (callback && typeof callback === 'function')
           callback()
       })
@@ -102,16 +117,20 @@ module.exports = class Producer {
 	produce(topic, data, callback) {
     if (this.isReady)
       try {
-        if (this.schemaIds[topic] == null) {
-          console.error('schemaId not found')
+        if (this.schemaIds[topic] === null) {
+          let message
+
+          if (this.failedSchemaIds[topic] !== null)
+            message = `Unable to produce, the schema not successfully registered. Message: ${this.failedSchemaIds[topic].message}`
+          else
+            message = `schemaId not found!`
+
           if (callback && typeof callback === 'function')
-            callback({
-              message: 'schemaId not found'
-            })
+            callback({ message })
         } else {
           const buffer = this.toMessageBuffer(topic, data, 10240)
           this.producer.produce(topic, null, buffer, null, null)
-          console.log('Successfully produce to kafka')
+          // console.log('Successfully produce to kafka')
         }
       } catch (err) {
         console.error(err)
