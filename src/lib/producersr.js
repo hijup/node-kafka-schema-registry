@@ -65,6 +65,8 @@ module.exports = class Producer {
     while (this.preProduced.length > 0) {
       const message = this.preProduced.shift()
       this.produce(...message)
+        .then(console.log)
+        .catch(console.error)
     }
   }
 	
@@ -97,31 +99,34 @@ module.exports = class Producer {
       })
 	}
 	
-	produce(topic, data, callback) {
-    if (this.isReady)
-      try {
-        if (this.schemaIds[topic] == null) {
-          let message
-
-          if (this.failedSchemaIds[topic] != null)
-            message = `Unable to produce, the schema not successfully registered. Message: ${this.failedSchemaIds[topic].message}`
-          else
-            message = `schemaId not found!`
-
-          if (callback && typeof callback === 'function')
-            callback({ message })
-        } else {
-          const buffer = this.toMessageBuffer(topic, data, 10240)
-          this.producer.produce(topic, null, buffer, null, null)
-          // console.log('Successfully produce to kafka')
+	produce(topic, data) {
+    return new Promise((resolve, reject) => {
+      if (this.isReady) {
+        if (this.failedSchemaIds[topic] != null)
+          reject({
+            error: true,
+            message: `Unable to produce, the schema isn't successfully registered. ${this.failedSchemaIds[topic].message}`
+          })
+        else if (this.schemaIds[topic] == null)
+          reject({
+            error: true,
+            message: `schemaId not found!`
+          })
+        else {
+          try {
+            const buffer = this.toMessageBuffer(topic, data, 10240)
+            this.producer.produce(topic, null, buffer, null, null)
+            console.log('trying')
+            resolve({ message: 'Message produced'})
+          } catch (err) {
+            reject(err)
+          }
         }
-      } catch (err) {
-        console.error(err)
-        if (callback && typeof callback === 'function')
-          callback(err)
+      } else {
+        this.preProduced.push([topic, data])
+        resolve({ success: false, message: `Producer not yet ready, message quequed`})
       }
-    else
-      this.preProduced.push([topic, data, callback])
+    })
   }
   
   disconnect() {
