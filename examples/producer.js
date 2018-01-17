@@ -17,9 +17,9 @@ for (let i = 0; i < 100; i++) {
     is_good: true,
     created_at: Date.now()
   }
-    producer.produce('example', message, err => {
-      console.log(err)
-    })
+    producer.produce('example', message)
+      .then(console.log)
+      .catch(console.error)
 }
 
 process.on('SIGINT', () => {
