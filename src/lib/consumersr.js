@@ -27,7 +27,7 @@ module.exports = class Consumer {
       .on('ready', arg => {
         console.log('consumer ready', JSON.stringify(arg))
         this.consumer
-          .subscribe([this.topicNames])
+          .subscribe(this.topicNames)
           .consume()
 
           console.log(`topic names: ${this.topicNames.join(', ')}`)
@@ -78,10 +78,7 @@ module.exports = class Consumer {
     return type.fromBuffer(dataBuffer)
   }
 
-  disconnect(callback) {
-    if (callback && typeof callback === 'function')
-      this.consumer.disconnect(callback)
-    else
-      this.consumer.disconnect()
+  disconnect() {
+    this.consumer.disconnect()
   }
 }
